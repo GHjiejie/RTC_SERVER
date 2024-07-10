@@ -1,52 +1,61 @@
 const express = require("express");
-const http = require("http");
-const socketIO = require("socket.io");
+const https = require("https");
+const fs = require("fs");
+const socketIo = require("socket.io");
 
 const app = express();
-const server = http.createServer(app);
-const io = socketIO(server, {
+
+// 读取SSL证书和密钥文件
+const options = {
+  key: fs.readFileSync("/root/cert/private.key"),
+  cert: fs.readFileSync("/root/cert/certificate.crt"),
+};
+
+// 创建HTTPS服务器
+const server = https.createServer(options, app);
+const io = socketIo(server, {
   cors: {
-    origin: "*", // 允许所有来源连接，生产环境中请修改为你的前端域名
+    origin: "*",
   },
 });
 
-const PORT = 3000;
+const port = 3000;
+
+app.use(express.static("public"));
 
 io.on("connection", (socket) => {
-  console.log("用户连接:", socket.id);
+  console.log("a user connected: ", socket.id);
 
   socket.on("joinRoom", (roomId) => {
-    console.log(`用户 ${socket.id} 加入房间 ${roomId}`);
     socket.join(roomId);
+    console.log(`User ${socket.id} joined room ${roomId}`);
+    socket.to(roomId).emit("userJoined", socket.id);
+  });
 
-    const roomSockets = io.sockets.adapter.rooms.get(roomId);
-    const numClients = roomSockets ? roomSockets.size : 0;
+  socket.on("offer", (data) => {
+    const { offer, roomId } = data;
+    console.log(`Offer from ${socket.id} to room ${roomId}`);
+    socket.to(roomId).emit("offer", offer);
+  });
 
-    if (numClients > 1) {
-      // 如果房间里已经有其他人，通知新用户向其他人发送 offer
-      socket.emit("createOffer");
-    }
+  socket.on("answer", (data) => {
+    const { answer, roomId } = data;
+    console.log(`Answer from ${socket.id} to room ${roomId}`);
+    socket.to(roomId).emit("answer", answer);
+  });
 
-    socket.on("offer", (offer) => {
-      console.log(`收到来自 ${socket.id} 的 offer`);
-      socket.to(roomId).emit("offer", offer);
-    });
+  socket.on("iceCandidate", (data) => {
+    const { candidate, roomId } = data;
+    console.log(`ICE Candidate from ${socket.id} to room ${roomId}`);
+    socket.to(roomId).emit("iceCandidate", candidate);
+  });
 
-    socket.on("answer", (answer) => {
-      console.log(`收到来自 ${socket.id} 的 answer`);
-      socket.to(roomId).emit("answer", answer);
-    });
-
-    socket.on("candidate", (candidate) => {
-      console.log(`收到来自 ${socket.id} 的 ICE candidate`);
-      socket.to(roomId).emit("candidate", candidate);
-    });
-
-    socket.on("disconnect", () => {
-      console.log(`用户 ${socket.id} 断开连接`);
-      socket.to(roomId).emit("userDisconnected");
-    });
+  socket.on("disconnect", () => {
+    console.log("user disconnected: ", socket.id);
+    // Optional: You can emit an event to notify other users in the room
   });
 });
 
-server.listen(PORT, () => console.log(`服务器运行在端口 ${PORT}`));
+server.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
+});
